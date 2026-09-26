@@ -111,11 +111,25 @@ _APPLESCRIPT = r'''using terms from application "System Events"
         return false
     end pressAllow
 
-    on isAllowSheet(sheetRef, titles)
+    on hasAllowHeading(nodeRef, titles)
         try
-            return titles contains (name of sheetRef as text)
+            if (role of nodeRef as text) is "AXHeading" then
+                if titles contains (name of nodeRef as text) then return true
+            end if
+        end try
+        try
+            repeat with childRef in UI elements of nodeRef
+                if my hasAllowHeading(childRef, titles) then return true
+            end repeat
         end try
         return false
+    end hasAllowHeading
+
+    on isAllowSheet(sheetRef, titles)
+        try
+            if titles contains (name of sheetRef as text) then return true
+        end try
+        return my hasAllowHeading(sheetRef, titles)
     end isAllowSheet
 end using terms from
 
