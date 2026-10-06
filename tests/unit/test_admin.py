@@ -45,7 +45,7 @@ def test_cleanup_unattached_browser_launch_stops_posix_process_group(monkeypatch
     killed = []
     monkeypatch.setattr(admin.ipc, "IS_WINDOWS", False)
     monkeypatch.setattr("browser_harness.daemon._devtools_port_live", lambda _profile: False)
-    monkeypatch.setattr(admin.os, "killpg", lambda pid, sig: killed.append((pid, sig)))
+    monkeypatch.setattr(admin.os, "killpg", lambda pid, sig: killed.append((pid, sig)), raising=False)
 
     admin._cleanup_unattached_browser_launch((process, Path("/profile")))
 
@@ -55,7 +55,7 @@ def test_cleanup_unattached_browser_launch_stops_posix_process_group(monkeypatch
 def test_cleanup_unattached_browser_launch_keeps_cdp_browser(monkeypatch):
     process = FakeProcess()
     monkeypatch.setattr("browser_harness.daemon._devtools_port_live", lambda _profile: True)
-    monkeypatch.setattr(admin.os, "killpg", lambda _pid, _sig: pytest.fail("must keep the attached browser"))
+    monkeypatch.setattr(admin.os, "killpg", lambda _pid, _sig: pytest.fail("must keep the attached browser"), raising=False)
 
     admin._cleanup_unattached_browser_launch((process, Path("/profile")))
 
@@ -88,7 +88,7 @@ def test_explicit_chrome_path_retains_matching_profile_on_linux(monkeypatch, tmp
     monkeypatch.setattr("subprocess.Popen", lambda *_args, **_kwargs: process)
     killed = []
     monkeypatch.setattr(admin.ipc, "IS_WINDOWS", False)
-    monkeypatch.setattr(admin.os, "killpg", lambda pid, sig: killed.append((pid, sig)))
+    monkeypatch.setattr(admin.os, "killpg", lambda pid, sig: killed.append((pid, sig)), raising=False)
 
     launch = admin._launch_browser()
     assert launch == (process, profile)
@@ -112,7 +112,7 @@ def test_explicit_chrome_path_remains_unowned_without_platform_cleanup(monkeypat
     monkeypatch.setattr("browser_harness.daemon.remote_debugging_toggle_profiles", lambda: [profile])
     monkeypatch.setattr("platform.system", lambda: system)
     monkeypatch.setattr("subprocess.Popen", lambda *_args, **_kwargs: process)
-    monkeypatch.setattr(admin.os, "killpg", lambda *_args: pytest.fail("must not terminate an unowned browser"))
+    monkeypatch.setattr(admin.os, "killpg", lambda *_args: pytest.fail("must not terminate an unowned browser"), raising=False)
 
     launch = admin._launch_browser()
     assert launch == (process, None)
@@ -377,6 +377,7 @@ def test_is_snap_browser(path, expected):
     assert admin._is_snap_browser(path) == expected
 
 
+@pytest.mark.skipif(os.name == "nt", reason="Snap uses POSIX paths")
 def test_doctor_probe_preserves_snap_bin_env_symlink(monkeypatch, tmp_path):
     target = tmp_path / "usr" / "bin" / "snap"
     target.parent.mkdir(parents=True)
@@ -396,6 +397,7 @@ def test_doctor_probe_preserves_snap_bin_env_symlink(monkeypatch, tmp_path):
     assert admin._is_snap_browser(path)
 
 
+@pytest.mark.skipif(os.name == "nt", reason="Snap uses POSIX paths")
 def test_doctor_probe_preserves_snap_bin_path_symlink(monkeypatch, tmp_path):
     target = tmp_path / "usr" / "bin" / "snap"
     target.parent.mkdir(parents=True)
@@ -772,6 +774,9 @@ def test_restart_daemon_skips_sigterm_if_pid_was_reused_during_wait(monkeypatch,
     # Speed up the wait loop so the test finishes quickly. The loop polls 75
     # times at 0.2s = 15s; with sleep neutralized it runs in microseconds.
     monkeypatch.setattr(admin.time, "sleep", lambda _s: None)
+
+    start_times = iter([100.0, 200.0])
+    monkeypatch.setattr(admin, "_process_start_time", lambda _pid: next(start_times))
 
     admin.restart_daemon("default")
 
@@ -1330,9 +1335,16 @@ def test_spawn_lock_owner_cannot_unlink_successor(tmp_path, monkeypatch):
     monkeypatch.setattr(admin_mod.ipc, "pid_path", lambda name: tmp_path / "daemon.pid")
     first = admin_mod._spawn_lock(timeout=0.1)
     first.__enter__()
-    first.path.write_text(f"{os.getpid()} successor")
-    first.__exit__()
-    assert first.path.read_text() == f"{os.getpid()} successor"
+    if os.name == "nt":
+        # Windows denies replacing a file while its byte-range lock is held.
+        with pytest.raises(PermissionError):
+            first.path.write_text(f"{os.getpid()} successor")
+        first.__exit__()
+        assert first.path.exists()
+    else:
+        first.path.write_text(f"{os.getpid()} successor")
+        first.__exit__()
+        assert first.path.read_text() == f"{os.getpid()} successor"
 
 
 def test_process_identity_check_fails_closed_when_unavailable(monkeypatch):

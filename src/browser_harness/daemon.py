@@ -184,23 +184,28 @@ def remote_debugging_toggle_profiles():
     return out
 
 
-def browser_running_for_profile(base):
-    """True when a running browser instance holds this user-data-dir (POSIX)"""
+def singleton_pid(base):
+    """Pid of the running browser instance that holds this user-data-dir (POSIX), else None"""
     try:
         target = os.readlink(str(base / "SingletonLock"))
     except OSError:
-        return False
+        return None
     try:
         pid = int(target.rsplit("-", 1)[-1])
     except ValueError:
-        return False
+        return None
     try:
         os.kill(pid, 0)
-        return True
+        return pid
     except ProcessLookupError:
-        return False
+        return None
     except OSError:
-        return True  # pid exists but belongs to another user
+        return pid  # pid exists but belongs to another user or sandbox
+
+
+def browser_running_for_profile(base):
+    """True when a running browser instance holds this user-data-dir (POSIX)"""
+    return singleton_pid(base) is not None
 
 
 def supported_browser_running():
