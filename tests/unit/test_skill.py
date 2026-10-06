@@ -9,7 +9,7 @@ def _frontmatter(text: str) -> str:
 
 
 def test_packaged_skill_frontmatter_is_valid_simple_yaml():
-    text = resources.files("browser_harness").joinpath("SKILL.md").read_text()
+    text = resources.files("browser_harness").joinpath("SKILL.md").read_text(encoding="utf-8")
     metadata = {}
 
     for line in _frontmatter(text).splitlines():
